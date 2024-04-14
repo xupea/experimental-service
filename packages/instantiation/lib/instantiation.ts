@@ -37,21 +37,21 @@ export type GetLeadingNonServiceArgs<TArgs extends any[]> = TArgs extends []
 export interface IInstantiationService {
 	readonly _serviceBrand: undefined;
 
-	// createInstance<T>(descriptor: SyncDescriptor0<T>): T;
-	// createInstance<
-	// 	Ctor extends new (...args: any[]) => any,
-	// 	R extends InstanceType<Ctor>
-	// >(
-	// 	ctor: Ctor,
-	// 	...args: GetLeadingNonServiceArgs<ConstructorParameters<Ctor>>
-	// ): R;
+	createInstance<T>(descriptor: SyncDescriptor0<T>): T;
+	createInstance<
+		Ctor extends new (...args: any[]) => any,
+		R extends InstanceType<Ctor>
+	>(
+		ctor: Ctor,
+		...args: GetLeadingNonServiceArgs<ConstructorParameters<Ctor>>
+	): R;
 
 	invokeFunction<R, TS extends any[] = []>(
 		fn: (accessor: ServicesAccessor, ...args: TS) => R,
 		...args: TS
 	): R;
 
-	// createChild(services: ServiceCollection): IInstantiationService;
+	createChild(services: ServiceCollection): IInstantiationService;
 }
 
 export interface ServiceIdentifier<T> {

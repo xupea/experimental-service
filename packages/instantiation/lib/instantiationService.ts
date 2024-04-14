@@ -1,6 +1,7 @@
-import { SyncDescriptor } from "./descriptors";
+import { SyncDescriptor, SyncDescriptor0 } from "./descriptors";
 import { Graph } from "./graph";
 import {
+	GetLeadingNonServiceArgs,
 	IInstantiationService,
 	ServiceIdentifier,
 	ServicesAccessor,
@@ -8,30 +9,41 @@ import {
 } from "./instantiation";
 import { ServiceCollection } from "./serviceCollection";
 
-const _enableAllTracing = true;
-
 export class InstantiationService implements IInstantiationService {
 	readonly _serviceBrand: undefined;
+
+	readonly _globalGraph?: Graph<string>;
+	private _globalGraphImplicitDependency?: string;
+
+	private readonly _children = new Set<InstantiationService>();
 
 	constructor(
 		private readonly _services = new ServiceCollection(),
 		private readonly _strict = false,
-		private readonly _parent?: InstantiationService,
-		private readonly _enableTracing = _enableAllTracing
+		private readonly _parent?: InstantiationService
 	) {
 		this._services.set(IInstantiationService, this);
+		this._globalGraph = _parent?._globalGraph ?? new Graph((e) => e);
+	}
+
+	createChild(services: ServiceCollection): IInstantiationService {
+		const result = new (class extends InstantiationService {})(
+			services,
+			this._strict,
+			this
+		);
+		this._children.add(result);
+		return result;
 	}
 
 	invokeFunction<R, TS extends any[] = []>(
 		fn: (accessor: ServicesAccessor, ...args: TS) => R,
 		...args: TS
 	): R {
-		const _trace = Trace.traceInvocation(this._enableTracing, fn);
-
 		try {
 			const accessor: ServicesAccessor = {
 				get: <T>(id: ServiceIdentifier<T>) => {
-					const result = this._getOrCreateServiceInstance(id, _trace);
+					const result = this._getOrCreateServiceInstance(id);
 					if (!result) {
 						throw new Error(`[invokeFunction] unknown service '${id}'`);
 					}
@@ -40,19 +52,42 @@ export class InstantiationService implements IInstantiationService {
 			};
 			return fn(accessor, ...args);
 		} finally {
-			_trace.stop();
-			console.log(Trace.all);
+			console.log("invokeFunction finally");
 		}
 	}
 
-	private _createInstance<T>(ctor: any, args: any[] = [], _trace: Trace): T {
+	createInstance<T>(descriptor: SyncDescriptor0<T>): T;
+	createInstance<
+		Ctor extends new (...args: any[]) => any,
+		R extends InstanceType<Ctor>
+	>(
+		ctor: Ctor,
+		...args: GetLeadingNonServiceArgs<ConstructorParameters<Ctor>>
+	): R;
+	createInstance(
+		ctorOrDescriptor: any | SyncDescriptor<any>,
+		...rest: any[]
+	): any {
+		let result: any;
+		if (ctorOrDescriptor instanceof SyncDescriptor) {
+			result = this._createInstance(
+				ctorOrDescriptor.ctor,
+				ctorOrDescriptor.staticArguments.concat(rest)
+			);
+		} else {
+			result = this._createInstance(ctorOrDescriptor, rest);
+		}
+		return result;
+	}
+
+	private _createInstance<T>(ctor: any, args: any[] = []): T {
 		// arguments defined by service decorators
 		const serviceDependencies = _util
 			.getServiceDependencies(ctor)
 			.sort((a, b) => a.index - b.index);
 		const serviceArgs: any[] = [];
 		for (const dependency of serviceDependencies) {
-			const service = this._getOrCreateServiceInstance(dependency.id, _trace);
+			const service = this._getOrCreateServiceInstance(dependency.id);
 			if (!service) {
 				// this._throwIfStrict(`[createInstance] ${ctor.name} depends on UNKNOWN service ${dependency.id}.`, false);
 			}
@@ -107,20 +142,12 @@ export class InstantiationService implements IInstantiationService {
 		}
 	}
 
-	protected _getOrCreateServiceInstance<T>(
-		id: ServiceIdentifier<T>,
-		_trace: Trace
-	): T {
+	protected _getOrCreateServiceInstance<T>(id: ServiceIdentifier<T>): T {
 		const thing = this._getServiceInstanceOrDescriptor(id);
 
 		if (thing instanceof SyncDescriptor) {
-			return this._safeCreateAndCacheServiceInstance(
-				id,
-				thing,
-				_trace.branch(id, true)
-			);
+			return this._safeCreateAndCacheServiceInstance(id, thing);
 		} else {
-			_trace.branch(id, false);
 			return thing;
 		}
 	}
@@ -129,8 +156,7 @@ export class InstantiationService implements IInstantiationService {
 
 	private _safeCreateAndCacheServiceInstance<T>(
 		id: ServiceIdentifier<T>,
-		desc: SyncDescriptor<T>,
-		_trace: Trace
+		desc: SyncDescriptor<T>
 	): T {
 		if (this._activeInstantiations.has(id)) {
 			throw new Error(
@@ -141,7 +167,7 @@ export class InstantiationService implements IInstantiationService {
 		this._activeInstantiations.add(id);
 
 		try {
-			return this._createAndCacheServiceInstance(id, desc, _trace);
+			return this._createAndCacheServiceInstance(id, desc);
 		} finally {
 			this._activeInstantiations.delete(id);
 		}
@@ -149,19 +175,17 @@ export class InstantiationService implements IInstantiationService {
 
 	private _createAndCacheServiceInstance<T>(
 		id: ServiceIdentifier<T>,
-		desc: SyncDescriptor<T>,
-		_trace: Trace
+		desc: SyncDescriptor<T>
 	): T {
 		type Triple = {
 			id: ServiceIdentifier<any>;
 			desc: SyncDescriptor<any>;
-			_trace: Trace;
 		};
 		const graph = new Graph<Triple>((data) => data.id.toString());
 
 		let cycleCount = 0;
 
-		const stack = [{ id, desc, _trace }];
+		const stack = [{ id, desc }];
 
 		while (stack.length) {
 			const item = stack.pop()!;
@@ -186,7 +210,6 @@ export class InstantiationService implements IInstantiationService {
 					const d = {
 						id: dependency.id,
 						desc: instanceOrDesc,
-						_trace: item._trace.branch(dependency.id, true),
 					};
 					graph.insertEdge(item, d);
 					stack.push(d);
@@ -215,8 +238,7 @@ export class InstantiationService implements IInstantiationService {
 						data.id,
 						data.desc.ctor,
 						data.desc.staticArguments,
-						data.desc.supportsDelayedInstantiation,
-						data._trace
+						data.desc.supportsDelayedInstantiation
 					);
 					this._setServiceInstance(data.id, instance);
 				}
@@ -232,24 +254,21 @@ export class InstantiationService implements IInstantiationService {
 		id: ServiceIdentifier<T>,
 		ctor: any,
 		args: any[] = [],
-		supportsDelayedInstantiation: boolean,
-		_trace: Trace
+		supportsDelayedInstantiation: boolean
 	): T {
 		if (this._services.get(id) instanceof SyncDescriptor) {
 			return this._createServiceInstance(
 				id,
 				ctor,
 				args,
-				supportsDelayedInstantiation,
-				_trace
+				supportsDelayedInstantiation
 			);
 		} else if (this._parent) {
 			return this._parent._createServiceInstanceWithOwner(
 				id,
 				ctor,
 				args,
-				supportsDelayedInstantiation,
-				_trace
+				supportsDelayedInstantiation
 			);
 		} else {
 			throw new Error(
@@ -262,12 +281,11 @@ export class InstantiationService implements IInstantiationService {
 		id: ServiceIdentifier<T>,
 		ctor: any,
 		args: any[] = [],
-		supportsDelayedInstantiation: boolean,
-		_trace: Trace
+		supportsDelayedInstantiation: boolean
 	): T {
 		if (!supportsDelayedInstantiation) {
 			// eager instantiation
-			return this._createInstance(ctor, args, _trace);
+			return this._createInstance(ctor, args);
 		} else {
 			const child = new InstantiationService(undefined, this._strict, this);
 			return <T>new Proxy(Object.create(null), {
@@ -279,91 +297,6 @@ export class InstantiationService implements IInstantiationService {
 					return ctor.prototype;
 				},
 			});
-		}
-	}
-}
-
-const enum TraceType {
-	None = 0,
-	Creation = 1,
-	Invocation = 2,
-	Branch = 3,
-}
-
-export class Trace {
-	static all = new Set<string>();
-
-	private static readonly _None = new (class extends Trace {
-		constructor() {
-			super(TraceType.None, null);
-		}
-		override stop() {}
-		override branch() {
-			return this;
-		}
-	})();
-
-	static traceInvocation(_enableTracing: boolean, ctor: any): Trace {
-		return !_enableTracing
-			? Trace._None
-			: new Trace(
-					TraceType.Invocation,
-					ctor.name || new Error().stack!.split("\n").slice(3, 4).join("\n")
-			  );
-	}
-
-	static traceCreation(_enableTracing: boolean, ctor: any): Trace {
-		return !_enableTracing
-			? Trace._None
-			: new Trace(TraceType.Creation, ctor.name);
-	}
-
-	private static _totals: number = 0;
-	private readonly _start: number = Date.now();
-	private readonly _dep: [ServiceIdentifier<any>, boolean, Trace?][] = [];
-
-	private constructor(readonly type: TraceType, readonly name: string | null) {}
-
-	branch(id: ServiceIdentifier<any>, first: boolean): Trace {
-		const child = new Trace(TraceType.Branch, id.toString());
-		this._dep.push([id, first, child]);
-		return child;
-	}
-
-	stop() {
-		const dur = Date.now() - this._start;
-		Trace._totals += dur;
-
-		let causedCreation = false;
-
-		function printChild(n: number, trace: Trace) {
-			const res: string[] = [];
-			const prefix = new Array(n + 1).join("\t");
-			for (const [id, first, child] of trace._dep) {
-				if (first && child) {
-					causedCreation = true;
-					res.push(`${prefix}CREATES -> ${id}`);
-					const nested = printChild(n + 1, child);
-					if (nested) {
-						res.push(nested);
-					}
-				} else {
-					res.push(`${prefix}uses -> ${id}`);
-				}
-			}
-			return res.join("\n");
-		}
-
-		const lines = [
-			`${this.type === TraceType.Creation ? "CREATE" : "CALL"} ${this.name}`,
-			`${printChild(1, this)}`,
-			`DONE, took ${dur.toFixed(2)}ms (grand total ${Trace._totals.toFixed(
-				2
-			)}ms)`,
-		];
-
-		if (dur > 2 || causedCreation) {
-			Trace.all.add(lines.join("\n"));
 		}
 	}
 }
