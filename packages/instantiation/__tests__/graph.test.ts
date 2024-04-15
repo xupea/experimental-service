@@ -30,7 +30,6 @@ describe("Graph", () => {
 	test("root", () => {
 		graph.insertEdge("1", "2");
 		let roots = graph.roots();
-		console.log((graph as any)._nodes)
 		expect(roots.length).toBe(1);
 		expect(roots[0].data).toBe("2");
 

@@ -48,7 +48,7 @@ export class InstantiationService implements IInstantiationService {
 			};
 			return fn(accessor, ...args);
 		} finally {
-			console.log("invokeFunction finally");
+			// console.log("invokeFunction finally");
 		}
 	}
 

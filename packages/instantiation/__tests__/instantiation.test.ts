@@ -44,6 +44,24 @@ interface IDependentService {
 	name: string;
 }
 
+class ServiceLoop1 implements IService1 {
+	declare readonly _serviceBrand: undefined;
+	c = 1;
+
+	constructor(@IService2 s: IService2) {
+
+	}
+}
+
+class ServiceLoop2 implements IService2 {
+	declare readonly _serviceBrand: undefined;
+	d = true;
+
+	constructor(@IService1 s: IService1) {
+
+	}
+}
+
 class DependentService implements IDependentService {
 	declare readonly _serviceBrand: undefined;
 	constructor(@IService1 service: IService1) {
@@ -84,5 +102,32 @@ describe("InstantiationService", () => {
 
 		// @ts-ignore
 		service.createInstance(Service1Consumer);
+	});
+
+	test('SyncDesc - explode on loop',  () => {
+		const collection = new ServiceCollection();
+		const service = new InstantiationService(collection);
+		collection.set(IService1, new SyncDescriptor<IService1>(ServiceLoop1));
+		collection.set(IService2, new SyncDescriptor<IService2>(ServiceLoop2));
+
+		expect(() => {
+			service.invokeFunction(accessor => {
+				accessor.get(IService1);
+			});
+		}).toThrowError();
+		expect(() => {
+			service.invokeFunction(accessor => {
+				accessor.get(IService2);
+			});
+		}).toThrowError();
+
+		try {
+			service.invokeFunction(accessor => {
+				accessor.get(IService1);
+			});
+		} catch (err) {
+			expect(err.name).toBeTruthy();
+			expect(err.message).toBeTruthy();
+		}
 	});
 });
