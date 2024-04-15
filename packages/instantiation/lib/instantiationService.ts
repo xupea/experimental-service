@@ -89,7 +89,9 @@ export class InstantiationService implements IInstantiationService {
 		for (const dependency of serviceDependencies) {
 			const service = this._getOrCreateServiceInstance(dependency.id);
 			if (!service) {
-				// this._throwIfStrict(`[createInstance] ${ctor.name} depends on UNKNOWN service ${dependency.id}.`, false);
+				throw new Error(
+					`[createInstance] ${ctor.name} depends on UNKNOWN service ${dependency.id}.`
+				);
 			}
 			serviceArgs.push(service);
 		}
@@ -237,8 +239,7 @@ export class InstantiationService implements IInstantiationService {
 					const instance = this._createServiceInstanceWithOwner(
 						data.id,
 						data.desc.ctor,
-						data.desc.staticArguments,
-						data.desc.supportsDelayedInstantiation
+						data.desc.staticArguments
 					);
 					this._setServiceInstance(data.id, instance);
 				}
@@ -253,23 +254,12 @@ export class InstantiationService implements IInstantiationService {
 	private _createServiceInstanceWithOwner<T>(
 		id: ServiceIdentifier<T>,
 		ctor: any,
-		args: any[] = [],
-		supportsDelayedInstantiation: boolean
+		args: any[] = []
 	): T {
 		if (this._services.get(id) instanceof SyncDescriptor) {
-			return this._createServiceInstance(
-				id,
-				ctor,
-				args,
-				supportsDelayedInstantiation
-			);
+			return this._createServiceInstance(id, ctor, args);
 		} else if (this._parent) {
-			return this._parent._createServiceInstanceWithOwner(
-				id,
-				ctor,
-				args,
-				supportsDelayedInstantiation
-			);
+			return this._parent._createServiceInstanceWithOwner(id, ctor, args);
 		} else {
 			throw new Error(
 				`illegalState - creating UNKNOWN service instance ${ctor.name}`
@@ -280,23 +270,8 @@ export class InstantiationService implements IInstantiationService {
 	private _createServiceInstance<T>(
 		id: ServiceIdentifier<T>,
 		ctor: any,
-		args: any[] = [],
-		supportsDelayedInstantiation: boolean
+		args: any[] = []
 	): T {
-		if (!supportsDelayedInstantiation) {
-			// eager instantiation
-			return this._createInstance(ctor, args);
-		} else {
-			const child = new InstantiationService(undefined, this._strict, this);
-			return <T>new Proxy(Object.create(null), {
-				get(target: any, key: PropertyKey): any {},
-				set(_target: T, p: PropertyKey, value: any): boolean {
-					return true;
-				},
-				getPrototypeOf(_target: T) {
-					return ctor.prototype;
-				},
-			});
-		}
+		return this._createInstance(ctor, args);
 	}
 }

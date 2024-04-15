@@ -14,7 +14,7 @@ export class Graph<T> {
 		const ret: Node<T>[] = [];
 
 		for (const node of this._nodes.values()) {
-			if (node.incoming.size === 0) {
+			if (node.outgoing.size === 0) {
 				ret.push(node);
 			}
 		}

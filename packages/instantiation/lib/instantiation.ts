@@ -60,6 +60,10 @@ export interface ServiceIdentifier<T> {
 }
 
 export function createDecorator<T>(serviceId: string): ServiceIdentifier<T> {
+	if (_util.serviceIds.has(serviceId)) {
+		return _util.serviceIds.get(serviceId)!;
+	}
+
 	const id = <any>function (target: Function, key: string, index: number): any {
 		if (arguments.length !== 3) {
 			throw new Error(
