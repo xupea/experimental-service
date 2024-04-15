@@ -12,9 +12,6 @@ import { ServiceCollection } from "./serviceCollection";
 export class InstantiationService implements IInstantiationService {
 	readonly _serviceBrand: undefined;
 
-	readonly _globalGraph?: Graph<string>;
-	private _globalGraphImplicitDependency?: string;
-
 	private readonly _children = new Set<InstantiationService>();
 
 	constructor(
@@ -23,7 +20,6 @@ export class InstantiationService implements IInstantiationService {
 		private readonly _parent?: InstantiationService
 	) {
 		this._services.set(IInstantiationService, this);
-		this._globalGraph = _parent?._globalGraph ?? new Graph((e) => e);
 	}
 
 	createChild(services: ServiceCollection): IInstantiationService {
